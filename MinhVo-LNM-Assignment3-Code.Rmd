@@ -1,0 +1,231 @@
+---
+title: "LNM Assignment 3 - Binary Logistic Regression Model"
+author: "Minh Vo"
+output:
+  html_document: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+Goal: Train a binary logistic regression model on the `claim_history.csv`.  Your model will predict the likelihood of filing more than one claim in one unit of exposure. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rmarkdown)
+```
+
+## Library
+
+```{r Importing libraries}
+require(caret)
+require(dplyr)
+require(MASS)
+require(ggplot2)
+require(bootStepAIC)
+require(lmtest)
+
+```
+
+## Code
+
+```{r Preprocessing Data}
+claim <- read.csv("claim_history.csv")
+head(claim)
+
+#Calculate Frequency
+claim <- claim %>% mutate(FREQUENCY = CLM_COUNT/EXPOSURE)
+
+#create a binary target variable EVENT by determining if Frequency >> 1
+claim <- claim %>% mutate(EVENT = ifelse(FREQUENCY > 1,1,0))
+
+#New dataset with EVENT as target variable and necessary predictors:
+#MSTATUS, CAR_TYPE, REVOKED, and URBANICITY as the categorical predictors
+#CAR_AGE, MVR_PTS, TIF, and TRAVTIME as the interval predictors
+claim_2 <- claim[,c("MSTATUS", "CAR_TYPE", "REVOKED", "URBANICITY", "CAR_AGE", "MVR_PTS", "TIF", "TRAVTIME","CLM_COUNT","EXPOSURE", "FREQUENCY", "EVENT")]
+
+#Drop all missing values of target variables and predictors 
+claim_2 <- na.omit(claim_2)
+head(claim_2)
+```
+
+### Question 1
+
+A. For each predictor, generate a line chart that shows the odds of the
+Event by the predictor's unique values. The predictor's unique values
+are displayed in ascending lexical order.
+
+```{r 1A}
+# Calculate and plot the odds of the Event by each predictor's unique value
+
+odds_MSTATUS <- claim_2 %>% 
+  group_by(MSTATUS) %>% 
+  summarize(mean_Event = mean(EVENT)) %>% 
+  mutate(odds_MSTATUS = mean_Event / (1 - mean_Event))
+odds_CARTYPE <- claim_2 %>% 
+  group_by(CAR_TYPE) %>% 
+  summarize(mean_Event = mean(EVENT)) %>% 
+  mutate(odds_CARTYPE = mean_Event / (1 - mean_Event))
+odds_REVOKED <- claim_2 %>% 
+  group_by(REVOKED) %>% 
+  summarize(mean_Event = mean(EVENT)) %>% 
+  mutate(odds_REVOKED = mean_Event / (1 - mean_Event))
+odds_URBANICITY <- claim_2 %>% 
+  group_by(URBANICITY) %>% 
+  summarize(mean_Event = mean(EVENT)) %>% 
+  mutate(odds_URBANICITY = mean_Event / (1 - mean_Event))
+odds_CARAGE <- claim_2 %>% 
+  group_by(CAR_AGE) %>% 
+  summarize(mean_Event = mean(EVENT)) %>% 
+  mutate(odds_CARAGE = mean_Event / (1 - mean_Event))
+odds_MVRPTS <- claim_2 %>%
+  group_by(MVR_PTS) %>%
+  summarise(mean_Event = mean(EVENT)) %>%
+  mutate(odds_MVRPTS = mean_Event/(1 - mean_Event))
+odds_TIF <- claim_2 %>%
+  group_by(TIF) %>%
+  summarise(mean_Event = mean(EVENT)) %>%
+  mutate(odds_TIF = mean_Event/(1 - mean_Event))
+odds_TRAVTIME <- claim_2 %>%
+  group_by(TRAVTIME) %>%
+  summarise(mean_Event = mean(EVENT)) %>%
+  mutate(odds_TRAVTIME = mean_Event/(1 - mean_Event))
+
+ggplot(odds_MSTATUS, aes(x = MSTATUS, y = odds_MSTATUS, group = 1)) + geom_line() + ggtitle("Odds of EVENT by MSTATUS")
+ggplot(odds_CARTYPE, aes(x = CAR_TYPE, y = odds_CARTYPE, group = 1)) + geom_line() + ggtitle("Odds of EVENT by CAR TYPE")
+ggplot(odds_REVOKED, aes(x = REVOKED, y = odds_REVOKED, group = 1)) + geom_line() + ggtitle("Odds of EVENT by REVOKED")
+ggplot(odds_URBANICITY,aes(x = URBANICITY, y = odds_URBANICITY, group = 1)) + geom_line() + ggtitle("Odds of EVENT by URBAN & CITY")
+ggplot(odds_CARAGE,aes(x = CAR_AGE, y = odds_CARAGE, group = 1)) + geom_line() + ggtitle("Odds of EVENT by AGE OF CAR")
+ggplot(odds_MVRPTS,aes(x = MVR_PTS, y = odds_MVRPTS, group = 1)) + geom_line() + ggtitle("Odds of EVENT by MVR PTS")
+ggplot(odds_TIF,aes(x = TIF, y = odds_TIF, group = 1)) + geom_line() + ggtitle("Odds of EVENT by TIF")
+ggplot(odds_TRAVTIME,aes(x = TRAVTIME, y = odds_TRAVTIME, group = 1)) + geom_line() + ggtitle("Odds of EVENT by TRAVTIME")
+
+```
+
+B. The Entry Threshold is 0.05. Please provide a detailed report of the
+Forward Selection.
+
+```{r 1B-C}
+# Encoding some categorical predictors
+claim_2$MSTATUS <- ifelse(claim_2$MSTATUS == "Yes",1,0)
+claim_2$REVOKED <- ifelse(claim_2$REVOKED == "Yes",1,0)
+claim_2$URBANICITY <- ifelse(claim_2$URBANICITY == "Highly Urban/ Urban",1,0)
+dmy <- dummyVars(" ~ .", data = claim_2, fullRank = T)
+claim_3 <- data.frame(predict(dmy, newdata = claim_2))
+
+#Convert some features to factor
+#claim_2$EVENT <- as.factor(claim_2$EVENT)
+#claim_2$MSTATUS <- as.factor(claim_2$MSTATUS)
+#claim_2$CAR_TYPE <- as.factor(claim_2$CAR_TYPE)
+#claim_2$REVOKED <- as.factor(claim_2$REVOKED)
+#claim_2$URBANICITY <- as.factor(claim_2$URBANICITY)
+
+# Fit a full generalized linear model with all predictors above
+glm1 <- glm(EVENT~.-CLM_COUNT-EXPOSURE-FREQUENCY,data = claim_3,family = binomial(link = "logit"))
+summary(glm1)
+
+# Fit a basic GLM with only intercept
+basic.glm <- glm(EVENT~1,data = claim_3, family = binomial)
+summary(basic.glm)
+
+#Forward Selection
+forwards = step(basic.glm, scope=list(lower=formula(basic.glm),upper=formula(glm1)), direction="forward")
+summary(forwards)
+#glm1_boot <- boot.stepAIC(glm1,data=claim_2,B=50)
+#glm1_boot
+```
+
+The forward selection gave the final model with all 8 features:
+"MSTATUS", "CAR_TYPE", "REVOKED", "URBANICITY", "CAR_AGE", "MVR_PTS",
+"TIF", "TRAVTIME"
+
+```{r 1B continue}
+#Log-likelihood
+logLik(glm1) #-4604.172(df=13)
+
+anova(basic.glm,glm1,test = "Chi")
+
+#Deviance Chi-squares statistic
+glm1$null.deviance - glm1$deviance
+
+#Deviance degree-of-freedom
+df.residual(glm1)
+
+#Chi-square significance
+pchisq(glm1$deviance, glm1$df.residual, lower.tail = FALSE)
+
+```
+
+The forward selection gave the final model with all 8 features in the original model. Here is the detailed report: <br>
+* Predictors entered: "MSTATUS", "CAR_TYPE", "REVOKED", "URBANICITY", "CAR_AGE", "MVR_PTS", "TIF", and "TRAVTIME" <br>
+* Log-Likelihood value: -4604.172 <br> 
+* Deviance Chi-square statistic: 1619.6 <br>
+      Null Deviance: 10827.9 <br>
+      - Residual Deviance: 9208.3 <br>
+* Deviance degree-of-freedom: 9649 <br>
+* Chi-square significance: 0.999352 <br>
+The chi-square test for the Residual variance give p-value > 0.05, which means that the model fits well.<br>
+
+```{r 1D}
+summary(glm1)
+params <- coef(glm1)
+exp_params <- exp(params)
+table <- data.frame(params, exp_params)
+colnames(table) <- c("Parameter Estimates", "Exponential of Parameter Estimates")
+table
+```
+
+### Question 2
+
+Please color-code the markers according to the Exposure value. Also,
+please briefly comment on the graphs. A. Plot the predicted Event
+probability versus the observed Frequency. B. Plot the Deviance
+residuals versus the observed Frequency.
+
+```{r 2A}
+# Calculating the predicted Event probability
+pred_event <- predict(glm1, type = "response")
+
+# Plot the predicted Event probability versus the observed Frequency
+ggplot(claim_3, aes(x = FREQUENCY, y = pred_event, color = EXPOSURE)) + 
+  geom_point() + 
+  scale_color_continuous(name = "EXPOSURE", low = "brown2", high = "brown") + 
+  xlab("Frequency") + 
+  ylab("Predicted Event Probability") + 
+  ggtitle("Predicted Event Probability vs. Observed Frequency")
+```
+
+The visualization measures how the probability of Event is predicted accurately compared to the observed frequency. It is color-coded by Exposure feature: the darker the color is, the higher the Exposure is. It can be seen that the predicted probability of Event has the highest values when the Frequency is equal to 0, given the Exposure equal to 1. As the frequency increases, particularly up to 200 and more, the Exposure and prediction values of Event tend to get lower. The data points on the right of the chart (where frequency is over 800) implies the outlier of the data.
+
+```{r 2B}
+# Calculating the deviance residual
+dv_resid <- residuals(glm1,type = "deviance")
+
+# Plot the predicted Event probability versus the observed Frequency
+ggplot(claim_3, aes(x = FREQUENCY, y = dv_resid, color = EXPOSURE)) + 
+  geom_point() + 
+  scale_color_continuous(name = "EXPOSURE", low = "cyan2", high = "cyan4") + 
+  xlab("Frequency") + 
+  ylab("Deviance Residuals") + 
+  ggtitle("Deviance Residuals vs. Observed Frequency")
+```
+
+The chart plots the residuals of the model versus the observed frequency, which measures how inaccurate the model is compared to the actual result. There are also negative residuals, which are mostly distributed at the frequency of 0. By looking at the chart, we can also identify some more outliers in the dataset shown by the data points as frequency increases up to more than 600.
+
+### Question 3
+
+Calculate the Accuracy metric to assess your final model in Question 3.
+
+```{r}
+# Classifying the predicted Event probability: defined it as Event = 1 if predicted value >= 0.25
+event_classification <- ifelse(pred_event >= 0.25, 1, 0)
+
+Event <- data.frame(event_classification, claim_3$EVENT)
+colnames(Event) <- c("Predicted", "Actual")
+
+#Calculate the accuracy metric
+accuracy <- (sum(Event$Actual==Event$Predicted))/length(Event$Actual)
+accuracy
+```
+
+The final model predicted the probability of the Event (when the
+Frequency is strictly greater than one) with the accuracy of 67.53%
